@@ -5,7 +5,7 @@ import libsql_client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 
 # الإعدادات الرئيسية للمتجر
-TOKEN = '8949634245:AAG_pelvpPsgLJwDtp_5hvYSRXXIc8nPL98'
+TOKEN = '8538209350:AAG0N_i7WhSFgalo2fkEhaH5zyhD5fic7w0'
 ADMIN_ID = 7339897843
 CONTACT_LINK = 'https://t.me/RAMD3'
 CHANNEL_LINK = 'https://t.me/RAMD02I'
