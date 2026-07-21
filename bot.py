@@ -5,14 +5,12 @@ import libsql_client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 
 # الإعدادات الرئيسية للمتجر
-TOKEN = '8538209350:AAG0N_i7WhSFgalo2fkEhaH5zyhD5fic7w0'
+TOKEN = '8949634245:AAHdbmUjeaLFxYE3Evr6wfu6Kk8hfW4Henk'
 ADMIN_ID = 7339897843
 CONTACT_LINK = 'https://t.me/RAMD3'
 CHANNEL_LINK = 'https://t.me/RAMD02I'
-GROUP_CHAT_ID = -1002235940986   # معرف المجموعة للااشتراك الإجباري والنشر التلقائي
 
 # 🌐 بيانات قاعدة البيانات السحابية (Turso)
-# ضع هنا رابط قاعدة البيانات والـ Token الخاصين بحسابك في Turso
 TURSO_URL = "libsql://store-db-YOUR_USERNAME.turso.io"
 TURSO_TOKEN = "ey...YOUR_TURSO_AUTH_TOKEN"
 
@@ -41,26 +39,7 @@ def init_db():
 
 init_db()
 
-# --- دالة فحص الاشتراك الإجباري ---
-def check_join(user_id):
-    if user_id == ADMIN_ID:
-        return True
-    try:
-        member = bot.get_chat_member(GROUP_CHAT_ID, user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
-        return False
-    except Exception:
-        return False
-
-# --- أزرار الاشتراك الإجباري ---
-def join_markup():
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("📢 دخول مجموعة المبيعات", url=CHANNEL_LINK))
-    markup.row(InlineKeyboardButton("✅ تفعيل الاشتراك", callback_data="check_subscription"))
-    return markup
-
-# بناء أزرار التحكم بالحسابات (التالي/السابق/الشراء/تصفح الصور)
+# بناء أزرار التحكم بالحسابات
 def get_acc_markup(acc_id, acc_type, index, total, img_index=0, img_total=1):
     markup = InlineKeyboardMarkup()
     
@@ -89,7 +68,7 @@ def get_acc_markup(acc_id, acc_type, index, total, img_index=0, img_total=1):
 def main_menu(user_id):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data="page_ff_0"), InlineKeyboardButton("📘 فيسبوك", callback_data="page_fb_0"))
-    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data="page_tt_0"), InlineKeyboardButton("🏪 السوق اليومي", callback_data="page_market_0"))
+    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data="page_tt_0"))
     markup.row(InlineKeyboardButton("📋 الحسابات المتوفرة حالياً", callback_data="show_all_available"))
     markup.row(InlineKeyboardButton("➕ إرسال سلعة للبيع", callback_data="user_add_acc"))
     markup.row(InlineKeyboardButton("📦 المبيعات السابقة (داخل البوت)", callback_data="sold_accs"))
@@ -101,39 +80,14 @@ def main_menu(user_id):
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    if not check_join(message.from_user.id):
-        bot.send_message(message.chat.id, "🔒 عذراً عزيزي، يجب عليك الاشتراك في مجموعة عرض المبيعات أولاً لتتمكن من استخدام البوت ورؤية الحسابات!\n\nاشترك ثم اضغط على زر تفعيل الاشتراك 👇", parse_mode="Markdown", reply_markup=join_markup())
-        return
-
     async def save_user():
         async with await get_db() as db:
             await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", [message.chat.id])
     asyncio.run(save_user())
-    bot.send_message(message.chat.id, "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل ملاحضة‼️ يرجى التعامل بوسيط لضمان كفاءة البيع والثقة 💰:", reply_markup=main_menu(message.from_user.id))
-
-@bot.callback_query_handler(func=lambda call: call.data == "check_subscription")
-def check_sub_callback(call):
-    if check_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "✅ شكراً لك! تم تفعيل اشتراكك بنجاح.", show_alert=True)
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception:
-            pass
-        
-        async def save_user():
-            async with await get_db() as db:
-                await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", [call.from_user.id])
-        asyncio.run(save_user())
-        bot.send_message(call.message.chat.id, "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل:", reply_markup=main_menu(call.from_user.id))
-    else:
-        bot.answer_callback_query(call.id, "❌ لم تشترك في المجموعة بعد! يرجى الدخول والاشتراك أولاً.", show_alert=True)
+    bot.send_message(message.chat.id, "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل ملاحظة‼️ يرجى التعامل بوسيط لضمان كفاءة البيع والثقة 💰:", reply_markup=main_menu(message.from_user.id))
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_all_available")
 def show_all_available_accs(call):
-    if not check_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "🔒 يجب عليك الاشتراك في المجموعة أولاً!", show_alert=True)
-        return
-        
     async def fetch_available():
         async with await get_db() as db:
             res = await db.execute("SELECT id, type, price FROM accounts WHERE is_sold=0")
@@ -146,8 +100,8 @@ def show_all_available_accs(call):
         
     text = "📋 قائمة الحسابات المتوفرة حالياً للبيع:\n\n"
     for r in rows:
-        icon = "🎮" if r[1] == 'ff' else "📘" if r[1] == 'fb' else "🎵" if r[1] == 'tt' else "🏪"
-        name = "فري فاير" if r[1] == 'ff' else "فيسبوك" if r[1] == 'fb' else "تيك توك" if r[1] == 'tt' else "السوق اليومي"
+        icon = "🎮" if r[1] == 'ff' else "📘" if r[1] == 'fb' else "🎵"
+        name = "فري فاير" if r[1] == 'ff' else "فيسبوك" if r[1] == 'fb' else "تيك توك"
         text += f"{icon} {name} | الرقم المعرف: {r[0]} | السعر: {r[2]}\n"
     
     text += "\n💡 *لتصفح تفاصيل أي حساب ورؤية صوره، اضغط على القسم الخاص به من القائمة الرئيسية مباشرة.*"
@@ -174,9 +128,6 @@ def admin_panel(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "main_menu_back")
 def back_to_menu(call):
-    if not check_join(call.from_user.id):
-        bot.send_message(call.message.chat.id, "🔒 يجب عليك الاشتراك في المجموعة أولاً!", reply_markup=join_markup())
-        return
     try: 
         bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception: 
@@ -190,7 +141,7 @@ def add_account_start(call):
     
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data=f"settype_ff_{is_admin}"), InlineKeyboardButton("📘 فيسبوك", callback_data=f"settype_fb_{is_admin}"))
-    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data=f"settype_tt_{is_admin}"), InlineKeyboardButton("🏪 السوق اليومي", callback_data=f"settype_market_{is_admin}"))
+    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data=f"settype_tt_{is_admin}"))
     bot.edit_message_text("📁 اختر القسم الذي تريد إضافة السلعة أو المنشور إليه:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("settype_"))
@@ -284,10 +235,6 @@ def finish_adding_media(chat_id, user_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("page_") or call.data.startswith("media_"))
 def show_accounts(call):
-    if not check_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "🔒 يجب عليك الاشتراك في المجموعة أولاً لرؤية الحسابات!", show_alert=True)
-        return
-
     is_media_click = call.data.startswith("media_")
     parts = call.data.split("_")
     acc_type = parts[1]
@@ -318,11 +265,8 @@ def show_accounts(call):
     current_media_id = media_ids[img_index]
     current_media_type = media_types[img_index]
     
-    if acc_type == 'market':
-        caption = f"🏪 عروض السوق اليومي حالياً:\n\n🆔 رقم المنشور (ID): {acc[0]}\n📝 التفاصيل:\n{acc[2]}\n\n💵 السعر/العرض: {acc[3]}"
-    else:
-        name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك"
-        caption = f"📦 حساب {name_ar} متوفر حالياً:\n\n🆔 رقم الحساب (ID): {acc[0]}\n📝 الوصف:\n{acc[2]}\n\n💵 السعر: {acc[3]}"
+    name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك"
+    caption = f"📦 حساب {name_ar} متوفر حالياً:\n\n🆔 رقم الحساب (ID): {acc[0]}\n📝 الوصف:\n{acc[2]}\n\n💵 السعر: {acc[3]}"
     
     markup = get_acc_markup(acc[0], acc_type, index, len(accs), img_index, len(media_ids))
     
@@ -380,7 +324,7 @@ def review_pending(call):
     
     current_media_id = media_ids[img_index]
     current_media_type = media_types[img_index]
-    name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك" if acc_type == 'tt' else "السوق اليومي"
+    name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك"
     caption = f"📥 مراجعة منشور معلق من زبون:\n\n👤 المرسل: tg://user?id={user_id}\n📁 القسم: {name_ar}\n📝 الوصف:\n{desc}\n\n💵 السعر المقترح: {price}\n\n⚙️ اختر قبول المنشور لإضافته رسمياً أو رفضه لحذفه:"
     
     markup = InlineKeyboardMarkup()
@@ -480,7 +424,7 @@ def reject_order(call):
 def set_sold_step(call):
     if call.from_user.id != ADMIN_ID: return
     user_states[call.from_user.id] = {'step': 'sell_id'}
-    bot.edit_message_text("🔄 أرسل لي الآن (رقم ID الحساب) الذي قمت ببيعه ليتم إخفاؤه والنشر في المجموعة تلقائياً:", call.message.chat.id, call.message.message_id)
+    bot.edit_message_text("🔄 أرسل لي الآن (رقم ID الحساب) الذي قمت ببيعه ليتم إخفاؤه من المتجر:", call.message.chat.id, call.message.message_id)
 
 @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get('step') == 'sell_id')
 def process_sell_id(message):
@@ -504,24 +448,6 @@ def process_sell_id(message):
         acc_data = asyncio.run(db_sell())
         if acc_data:
             bot.send_message(message.chat.id, f"✅ تم نقل الحساب رقم {acc_id} إلى المبيعات السابقة بنجاح!")
-            group_caption = f"🔥 تم بيع حساب جديد بنجاح! ثقة وأمان دائم بفضل الله 👑\n\n🆔 رقم الحساب: {acc_data[0]}\n📝 القسم: {acc_data[1].upper()}\n📋 تفاصيل الحساب:\n{acc_data[2]}\n\n💰 السعر الذي تم البيع به: {acc_data[3]}\n\n📞 لتسليم حساباتكم أو الشراء تواصلوا مع الأدمن: {CONTACT_LINK}"
-            
-            try:
-                media_ids = json.loads(acc_data[4])
-                media_types = json.loads(acc_data[5])
-                first_media = media_ids[0]
-                first_type = media_types[0]
-            except Exception:
-                first_media = acc_data[4]
-                first_type = acc_data[5]
-
-            try:
-                if first_type == 'photo':
-                    bot.send_photo(GROUP_CHAT_ID, photo=first_media, caption=group_caption)
-                else:
-                    bot.send_video(GROUP_CHAT_ID, video=first_media, caption=group_caption)
-            except Exception as e:
-                print(f"⚠️ فشل النشر التلقائي للبيع: {e}")
         else:
             bot.send_message(message.chat.id, f"❌ لم يتم العثور على حساب يحمل الرقم {acc_id} في القاعدة.")
     except Exception as e:
@@ -563,9 +489,6 @@ def process_delete_id(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def buy_callback(call):
-    if not check_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "🔒 يجب عليك الاشتراك في المجموعة أولاً!", show_alert=True)
-        return
     acc_id = call.data.split("_")[1]
     user = call.from_user
     username = f"@{user.username}" if user.username else "لا يملك معرف"
@@ -601,9 +524,6 @@ def send_broadcast(message):
 
 @bot.callback_query_handler(func=lambda call: call.data == "sold_accs")
 def show_sold(call):
-    if not check_join(call.from_user.id):
-        bot.answer_callback_query(call.id, "🔒 يجب عليك الاشتراك في المجموعة أولاً!", show_alert=True)
-        return
     async def get_sold():
         async with await get_db() as db:
             res = await db.execute("SELECT * FROM accounts WHERE is_sold=1")
@@ -617,5 +537,5 @@ def show_sold(call):
     for acc in accs:
         bot.send_message(call.message.chat.id, f"✅ تم بيع حساب رقم: {acc[0]} \n📝 الوصف: {acc[2]}")
 
-print("🚀 [تشغيل]: البوت يعمل بالكامل مع قاعدة البيانات السحابية Turso...")
+print("🚀 [تشغيل]: البوت يعمل بالكامل...")
 bot.infinity_polling(timeout=60, long_polling_timeout=5)
