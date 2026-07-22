@@ -33,11 +33,43 @@ def init_db():
                     (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, desc TEXT, price TEXT, 
                      media_ids TEXT, media_types TEXT)''')
         asyncio.run(create_table())
-        print("✅ [قاعدة البيانات السحابية]: تم الاتصال بـ Turso وتحديث الجداول بنجاح.")
+        print("✅ [قاعدة البيانات]: تم الاتصال وتحديث الجداول بنجاح.")
     except Exception as e:
-        print(f"❌ [خطأ في قاعدة البيانات السحابية]: {e}")
+        print(f"❌ [خطأ في قاعدة البيانات]: {e}")
 
 init_db()
+
+# دالة إرسال إشعار تلقائي للجميع عند قبول أو نشر سلعة
+def notify_all_users(acc_type, price, desc):
+    type_names = {
+        'ff': '🎮 فري فاير',
+        'tt_beta': '🎵 تيك توك بيطا',
+        'tt_normal': '🎵 تيك توك عادي',
+        'fb_group': '📘 فيسبوك (مجموعة)',
+        'fb_page': '📘 فيسبوك (صفحة)'
+    }
+    category_name = type_names.get(acc_type, "سلعة جديدة")
+    
+    async def broadcast_new_item():
+        async with await get_db() as db:
+            res = await db.execute("SELECT user_id FROM users")
+            users = res.rows
+            
+        notification_text = (
+            f"📢 **تم إضافة سلعة جديدة في المتجر!**\n\n"
+            f"📁 **القسم:** {category_name}\n"
+            f"💵 **السعر:** {price}\n"
+            f"📝 **الوصف:** {desc[:100]}...\n\n"
+            f"💡 *ادخل إلى البوت الآن لتصفح التفاصيل والصور!*"
+        )
+        
+        for u in users:
+            try:
+                bot.send_message(u[0], notification_text, parse_mode="Markdown")
+            except Exception:
+                continue
+
+    asyncio.run(broadcast_new_item())
 
 # بناء أزرار التحكم بالحسابات
 def get_acc_markup(acc_id, acc_type, index, total, img_index=0, img_total=1):
@@ -67,8 +99,8 @@ def get_acc_markup(acc_id, acc_type, index, total, img_index=0, img_total=1):
 # القائمة الرئيسية
 def main_menu(user_id):
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data="page_ff_0"), InlineKeyboardButton("📘 فيسبوك", callback_data="page_fb_0"))
-    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data="page_tt_0"))
+    markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data="page_ff_0"))
+    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data="menu_tt"), InlineKeyboardButton("📘 فيسبوك", callback_data="menu_fb"))
     markup.row(InlineKeyboardButton("📋 الحسابات المتوفرة حالياً", callback_data="show_all_available"))
     markup.row(InlineKeyboardButton("➕ إرسال سلعة للبيع", callback_data="user_add_acc"))
     markup.row(InlineKeyboardButton("📦 المبيعات السابقة (داخل البوت)", callback_data="sold_accs"))
@@ -86,6 +118,23 @@ def start_cmd(message):
     asyncio.run(save_user())
     bot.send_message(message.chat.id, "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل ملاحظة‼️ يرجى التعامل بوسيط لضمان كفاءة البيع والثقة 💰:", reply_markup=main_menu(message.from_user.id))
 
+# القوائم الفرعية (تيك توك - فيسبوك)
+@bot.callback_query_handler(func=lambda call: call.data == "menu_tt")
+def sub_menu_tt(call):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("⚡ تيك توك بيطا", callback_data="page_tt_beta_0"))
+    markup.row(InlineKeyboardButton("🎵 تيك توك عادي", callback_data="page_tt_normal_0"))
+    markup.row(InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="main_menu_back"))
+    bot.edit_message_text("🎵 اختر نوع حساب التيك توك:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "menu_fb")
+def sub_menu_fb(call):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("👥 مجموعات فيسبوك", callback_data="page_fb_group_0"))
+    markup.row(InlineKeyboardButton("📄 صفحات فيسبوك", callback_data="page_fb_page_0"))
+    markup.row(InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="main_menu_back"))
+    bot.edit_message_text("📘 اختر نوع خدمات الفيسبوك:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
 @bot.callback_query_handler(func=lambda call: call.data == "show_all_available")
 def show_all_available_accs(call):
     async def fetch_available():
@@ -98,11 +147,18 @@ def show_all_available_accs(call):
         bot.answer_callback_query(call.id, "🛒 المتجر فارغ حالياً، لا توجد حسابات معروضة للبيع!", show_alert=True)
         return
         
+    type_names = {
+        'ff': '🎮 فري فاير',
+        'tt_beta': '🎵 تيك توك بيطا',
+        'tt_normal': '🎵 تيك توك عادي',
+        'fb_group': '📘 مجموعة فيسبوك',
+        'fb_page': '📘 صفحة فيسبوك'
+    }
+    
     text = "📋 قائمة الحسابات المتوفرة حالياً للبيع:\n\n"
     for r in rows:
-        icon = "🎮" if r[1] == 'ff' else "📘" if r[1] == 'fb' else "🎵"
-        name = "فري فاير" if r[1] == 'ff' else "فيسبوك" if r[1] == 'fb' else "تيك توك"
-        text += f"{icon} {name} | الرقم المعرف: {r[0]} | السعر: {r[2]}\n"
+        name = type_names.get(r[1], 'سلعة')
+        text += f"🔹 {name} | الرقم المعرف: {r[0]} | السعر: {r[2]}\n"
     
     text += "\n💡 *لتصفح تفاصيل أي حساب ورؤية صوره، اضغط على القسم الخاص به من القائمة الرئيسية مباشرة.*"
     bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
@@ -134,19 +190,24 @@ def back_to_menu(call):
         pass
     bot.send_message(call.message.chat.id, "اختر القسم الذي تريد تصفحه من الأسفل:", reply_markup=main_menu(call.from_user.id))
 
+# إختيار نوع السلعة عند الإضافة
 @bot.callback_query_handler(func=lambda call: call.data in ["add_acc", "user_add_acc"])
 def add_account_start(call):
     if call.data == "add_acc" and call.from_user.id != ADMIN_ID: return
     is_admin = "1" if call.from_user.id == ADMIN_ID and call.data == "add_acc" else "0"
     
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data=f"settype_ff_{is_admin}"), InlineKeyboardButton("📘 فيسبوك", callback_data=f"settype_fb_{is_admin}"))
-    markup.row(InlineKeyboardButton("🎵 تيك توك", callback_data=f"settype_tt_{is_admin}"))
+    markup.row(InlineKeyboardButton("🎮 فري فاير", callback_data=f"settype_ff_{is_admin}"))
+    markup.row(InlineKeyboardButton("🎵 تيك توك بيطا", callback_data=f"settype_tt_beta_{is_admin}"), InlineKeyboardButton("🎵 تيك توك عادي", callback_data=f"settype_tt_normal_{is_admin}"))
+    markup.row(InlineKeyboardButton("👥 مجموعة فيسبوك", callback_data=f"settype_fb_group_{is_admin}"), InlineKeyboardButton("📄 صفحة فيسبوك", callback_data=f"settype_fb_page_{is_admin}"))
     bot.edit_message_text("📁 اختر القسم الذي تريد إضافة السلعة أو المنشور إليه:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("settype_"))
 def process_type(call):
-    _, acc_type, is_admin = call.data.split("_")
+    parts = call.data.split("_")
+    is_admin = parts[-1]
+    acc_type = "_".join(parts[1:-1])
+    
     user_states[call.from_user.id] = {'type': acc_type, 'is_admin': is_admin, 'step': 'desc', 'media_ids': [], 'media_types': []}
     bot.edit_message_text("📝 الآن أرسل (تفاصيل المنشور أو وصف السلعة) بالتفصيل:", call.message.chat.id, call.message.message_id)
 
@@ -215,6 +276,8 @@ def finish_adding_media(chat_id, user_id):
         try:
             asyncio.run(save_to_db())
             bot.send_message(chat_id, "✅ تم حفظ المنشور مع كامل ألبومه وإضافته للمتجر بنجاح!")
+            # 🔔 إرسال إشعار تلقائي للجميع
+            notify_all_users(state_data['type'], state_data['price'], state_data['desc'])
         except Exception as e:
             bot.send_message(chat_id, "❌ حدث خطأ أثناء الحفظ في قاعدة البيانات.")
     else:
@@ -227,7 +290,7 @@ def finish_adding_media(chat_id, user_id):
         try:
             asyncio.run(save_to_pending())
             bot.send_message(chat_id, "📥 تم إرسال منشورك مع ألبومه بنجاح للأدمن للمراجعة!\nسيتم فحصه ونشره في البوت فوراً إذا كان موافقاً للشروط.")
-            bot.send_message(ADMIN_ID, "🔔 إشعار: زبون جديد قام بتقديم سلعة تحتوي على صور متعددة للبيع، ادخل للوحة التحكم لمراجعتها.")
+            bot.send_message(ADMIN_ID, "🔔 إشعار: زبون جديد قام بتقديم سلعة للبيع، ادخل للوحة التحكم لمراجعتها.")
         except Exception as e:
             bot.send_message(chat_id, "❌ فشل إرسال الطلب، يرجى إعادة المحاولة.")
             
@@ -237,9 +300,15 @@ def finish_adding_media(chat_id, user_id):
 def show_accounts(call):
     is_media_click = call.data.startswith("media_")
     parts = call.data.split("_")
-    acc_type = parts[1]
-    index = int(parts[2])
-    img_index = int(parts[3]) if is_media_click else 0
+    
+    if is_media_click:
+        img_index = int(parts[-1])
+        index = int(parts[-2])
+        acc_type = "_".join(parts[1:-2])
+    else:
+        img_index = 0
+        index = int(parts[-1])
+        acc_type = "_".join(parts[1:-1])
     
     async def get_accs():
         async with await get_db() as db:
@@ -265,7 +334,14 @@ def show_accounts(call):
     current_media_id = media_ids[img_index]
     current_media_type = media_types[img_index]
     
-    name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك"
+    type_names = {
+        'ff': 'فري فاير',
+        'tt_beta': 'تيك توك بيطا',
+        'tt_normal': 'تيك توك عادي',
+        'fb_group': 'مجموعة فيسبوك',
+        'fb_page': 'صفحة فيسبوك'
+    }
+    name_ar = type_names.get(acc_type, "السلعة")
     caption = f"📦 حساب {name_ar} متوفر حالياً:\n\n🆔 رقم الحساب (ID): {acc[0]}\n📝 الوصف:\n{acc[2]}\n\n💵 السعر: {acc[3]}"
     
     markup = get_acc_markup(acc[0], acc_type, index, len(accs), img_index, len(media_ids))
@@ -324,7 +400,15 @@ def review_pending(call):
     
     current_media_id = media_ids[img_index]
     current_media_type = media_types[img_index]
-    name_ar = "فري فاير" if acc_type == 'ff' else "فيسبوك" if acc_type == 'fb' else "تيك توك"
+    
+    type_names = {
+        'ff': 'فري فاير',
+        'tt_beta': 'تيك توك بيطا',
+        'tt_normal': 'تيك توك عادي',
+        'fb_group': 'مجموعة فيسبوك',
+        'fb_page': 'صفحة فيسبوك'
+    }
+    name_ar = type_names.get(acc_type, "السلعة")
     caption = f"📥 مراجعة منشور معلق من زبون:\n\n👤 المرسل: tg://user?id={user_id}\n📁 القسم: {name_ar}\n📝 الوصف:\n{desc}\n\n💵 السعر المقترح: {price}\n\n⚙️ اختر قبول المنشور لإضافته رسمياً أو رفضه لحذفه:"
     
     markup = InlineKeyboardMarkup()
@@ -387,11 +471,14 @@ def accept_order(call):
 
     row_data = asyncio.run(db_accept())
     if row_data:
-        bot.answer_callback_query(call.id, "✅ تم قبول السلعة بكامل صورها ونشرها في المتجر بنجاح!", show_alert=True)
+        bot.answer_callback_query(call.id, "✅ تم قبول السلعة ونشرها في المتجر بنجاح!", show_alert=True)
         try: 
             bot.send_message(row_data[1], "🎉 أخبار سارة! تم مراجعة منشورك وقبوله من طرف الأدمن، وهو الآن معروض للبيع مع كامل صوره داخل البوت.")
         except Exception: 
             pass
+            
+        # 🔔 إرسال إشعارات لجميع المستخدمين الذين ضغطوا /start عند قبول السلعة
+        notify_all_users(row_data[2], row_data[4], row_data[3])
     else:
         bot.answer_callback_query(call.id, "❌ تعذر العثور على البيانات.")
         
