@@ -1,8 +1,30 @@
 import time
+import os
+import threading
+from flask import Flask
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 
-# الإعدادات الرئيسية للمتجر
+# ==========================================
+# 1. خادم خفيف لإبقاء Render شغالاً 24/7
+# ==========================================
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive and running 24/7!"
+
+def run_flask():
+    # Render يحدد المنفذ تلقائياً عبر متغير البيئة PORT
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# تشغيل خادم الويب في الخلفية
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ==========================================
+# 2. الإعدادات الرئيسية للمتجر
+# ==========================================
 TOKEN = '8987897788:AAHl3s-gGhB3xACt5Uqv1Bb0B3zAkAWxu48'
 ADMIN_ID = 7339897843
 CONTACT_LINK = 'https://t.me/RAMD3'
@@ -552,5 +574,9 @@ def show_sold(call):
     for acc in sold_list:
         bot.send_message(call.message.chat.id, f"✅ تم بيع حساب رقم: {acc['id']} \n📝 الوصف: {acc['desc']}")
 
-print("🚀 [تشغيل]: البوت يعمل الآن بالذاكرة المؤقتة بدون قواعد بيانات...")
-bot.infinity_polling(timeout=60, long_polling_timeout=5)
+# ==========================================
+# 3. تشغيل استقبال الرسائل (Polling)
+# ==========================================
+if __name__ == '__main__':
+    print("🚀 [تشغيل]: البوت وسيرفر Flask يعملان الآن بنجاح على Render...")
+    bot.infinity_polling(timeout=60, long_polling_timeout=5)
