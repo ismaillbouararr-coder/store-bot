@@ -1,43 +1,23 @@
+import time
 import telebot
-import asyncio
-import json
-import libsql_client
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 
 # الإعدادات الرئيسية للمتجر
-TOKEN = '8949634245:AAHdbmUjeaLFxYE3Evr6wfu6Kk8hfW4Henk'
+TOKEN = '8987897788:AAHl3s-gGhB3xACt5Uqv1Bb0B3zAkAWxu48'
 ADMIN_ID = 7339897843
 CONTACT_LINK = 'https://t.me/RAMD3'
 CHANNEL_LINK = 'https://t.me/RAMD02I'
 
-# 🌐 بيانات قاعدة البيانات السحابية (Turso)
-TURSO_URL = "libsql://store-db-YOUR_USERNAME.turso.io"
-TURSO_TOKEN = "ey...YOUR_TURSO_AUTH_TOKEN"
-
 bot = telebot.TeleBot(TOKEN)
 user_states = {}
 
-# دالة إنشاء العميل للاتصال بقاعدة البيانات السحابية
-async def get_db():
-    return libsql_client.create_client_async(url=TURSO_URL, auth_token=TURSO_TOKEN)
+# 🧠 تخزين البيانات في الذاكرة بدلاً من SQLite
+accounts = []       # قائمة الحسابات والمعروضات
+users = set()       # مجموعة معرّفات المستخدمين (مُستقبلات الإشعارات)
+pending_orders = [] # الطلبات المعلقة بانتظار موافقة الأدمن
 
-def init_db():
-    try:
-        async def create_table():
-            async with await get_db() as db:
-                await db.execute('''CREATE TABLE IF NOT EXISTS accounts 
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, desc TEXT, price TEXT, 
-                     media_ids TEXT, media_types TEXT, is_sold INTEGER DEFAULT 0)''')
-                await db.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY)''')
-                await db.execute('''CREATE TABLE IF NOT EXISTS pending_orders 
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, desc TEXT, price TEXT, 
-                     media_ids TEXT, media_types TEXT)''')
-        asyncio.run(create_table())
-        print("✅ [قاعدة البيانات]: تم الاتصال وتحديث الجداول بنجاح.")
-    except Exception as e:
-        print(f"❌ [خطأ في قاعدة البيانات]: {e}")
-
-init_db()
+acc_id_counter = 1
+order_id_counter = 1
 
 # دالة إرسال إشعار تلقائي للجميع عند قبول أو نشر سلعة
 def notify_all_users(acc_type, price, desc):
@@ -50,26 +30,23 @@ def notify_all_users(acc_type, price, desc):
     }
     category_name = type_names.get(acc_type, "سلعة جديدة")
     
-    async def broadcast_new_item():
-        async with await get_db() as db:
-            res = await db.execute("SELECT user_id FROM users")
-            users = res.rows
-            
-        notification_text = (
-            f"📢 **تم إضافة سلعة جديدة في المتجر!**\n\n"
-            f"📁 **القسم:** {category_name}\n"
-            f"💵 **السعر:** {price}\n"
-            f"📝 **الوصف:** {desc[:100]}...\n\n"
-            f"💡 *ادخل إلى البوت الآن لتصفح التفاصيل والصور!*"
-        )
-        
-        for u in users:
-            try:
-                bot.send_message(u[0], notification_text, parse_mode="Markdown")
-            except Exception:
-                continue
-
-    asyncio.run(broadcast_new_item())
+    # تنظيف النص لمنع أخطاء التنسيق
+    clean_desc = desc.replace('*', '').replace('_', '').replace('`', '')
+    
+    notification_text = (
+        f"📢 تم إضافة سلعة جديدة في المتجر!\n\n"
+        f"📁 القسم: {category_name}\n"
+        f"💵 السعر: {price}\n"
+        f"📝 الوصف: {clean_desc[:100]}...\n\n"
+        f"💡 ادخل إلى البوت الآن لتصفح التفاصيل والصور!"
+    )
+    
+    for u_id in list(users):
+        try:
+            bot.send_message(u_id, notification_text)
+            time.sleep(0.04) # فاصل أمان لتفادي الحظر
+        except Exception:
+            continue
 
 # بناء أزرار التحكم بالحسابات
 def get_acc_markup(acc_id, acc_type, index, total, img_index=0, img_total=1):
@@ -112,11 +89,12 @@ def main_menu(user_id):
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    async def save_user():
-        async with await get_db() as db:
-            await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", [message.chat.id])
-    asyncio.run(save_user())
-    bot.send_message(message.chat.id, "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل ملاحظة‼️ يرجى التعامل بوسيط لضمان كفاءة البيع والثقة 💰:", reply_markup=main_menu(message.from_user.id))
+    users.add(message.chat.id)
+    bot.send_message(
+        message.chat.id, 
+        "👋 أهلاً بك في متجر الحسابات الرقمية! \n\nاختر القسم الذي تريد تصفحه من الأسفل ملاحظة‼️ يرجى التعامل بوسيط لضمان كفاءة البيع والثقة 💰:", 
+        reply_markup=main_menu(message.from_user.id)
+    )
 
 # القوائم الفرعية (تيك توك - فيسبوك)
 @bot.callback_query_handler(func=lambda call: call.data == "menu_tt")
@@ -137,13 +115,9 @@ def sub_menu_fb(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_all_available")
 def show_all_available_accs(call):
-    async def fetch_available():
-        async with await get_db() as db:
-            res = await db.execute("SELECT id, type, price FROM accounts WHERE is_sold=0")
-            return res.rows
-            
-    rows = asyncio.run(fetch_available())
-    if not rows:
+    available = [a for a in accounts if a['is_sold'] == 0]
+
+    if not available:
         bot.answer_callback_query(call.id, "🛒 المتجر فارغ حالياً، لا توجد حسابات معروضة للبيع!", show_alert=True)
         return
         
@@ -156,23 +130,18 @@ def show_all_available_accs(call):
     }
     
     text = "📋 قائمة الحسابات المتوفرة حالياً للبيع:\n\n"
-    for r in rows:
-        name = type_names.get(r[1], 'سلعة')
-        text += f"🔹 {name} | الرقم المعرف: {r[0]} | السعر: {r[2]}\n"
+    for r in available:
+        name = type_names.get(r['type'], 'سلعة')
+        text += f"🔹 {name} | الرقم المعرف: {r['id']} | السعر: {r['price']}\n"
     
-    text += "\n💡 *لتصفح تفاصيل أي حساب ورؤية صوره، اضغط على القسم الخاص به من القائمة الرئيسية مباشرة.*"
-    bot.send_message(call.message.chat.id, text, parse_mode="Markdown")
+    text += "\n💡 لتصفح تفاصيل أي حساب ورؤية صوره، اضغط على القسم الخاص به من القائمة الرئيسية مباشرة."
+    bot.send_message(call.message.chat.id, text)
 
 @bot.callback_query_handler(func=lambda call: call.data == "admin_panel")
 def admin_panel(call):
     if call.from_user.id != ADMIN_ID: return
     
-    async def get_pending_count():
-        async with await get_db() as db:
-            res = await db.execute("SELECT COUNT(*) FROM pending_orders")
-            return res.rows[0][0] if res.rows else 0
-            
-    count = asyncio.run(get_pending_count())
+    count = len(pending_orders)
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("➕ إضافة حساب جديد", callback_data="add_acc"))
     markup.row(InlineKeyboardButton(f"📥 مراجعة طلبات السلع ({count})", callback_data="review_pending_0"))
@@ -180,7 +149,10 @@ def admin_panel(call):
     markup.row(InlineKeyboardButton("❌ حذف حساب نهائياً", callback_data="del_acc"))
     markup.row(InlineKeyboardButton("📢 إرسال إعلان للجميع", callback_data="broadcast"))
     markup.row(InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="main_menu_back"))
-    bot.edit_message_text(f"🛠 لوحة التحكم الخاصة بالأدمن:\nاختر العملية التي تريد القيام بها:\n\n📥 يوجد حالياً {count} منشورات معلقة بانتظار المراجعة.", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.edit_message_text(
+        f"🛠 لوحة التحكم الخاصة بالأدمن:\nاختر العملية التي تريد القيام بها:\n\n📥 يوجد حالياً {count} منشورات معلقة بانتظار المراجعة.", 
+        call.message.chat.id, call.message.message_id, reply_markup=markup
+    )
 
 @bot.callback_query_handler(func=lambda call: call.data == "main_menu_back")
 def back_to_menu(call):
@@ -245,7 +217,7 @@ def process_media(message):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("➕ إضافة صورة/فيديو آخر", callback_data="add_more_media"))
     markup.row(InlineKeyboardButton("✅ إنهاء وحفظ المنشور رسمياً", callback_data="finish_media"))
-    bot.send_message(message.chat.id, f"📸 تم استلام الوسيط رقم ({len(state_data['media_ids'])}). هل تريد إضافة المزيد من الصور التوضيحية لهذا الحساب أم تكتفي بهذا؟", reply_markup=markup)
+    bot.send_message(message.chat.id, f"📸 تم استلام الوسيط رقم ({len(state_data['media_ids'])}). هل تريد إضافة المزيد من الصور أم تكتفي بهذا؟", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "add_more_media")
 def ask_more_media(call):
@@ -260,39 +232,40 @@ def finish_media_callback(call):
     finish_adding_media(call.message.chat.id, call.from_user.id)
 
 def finish_adding_media(chat_id, user_id):
+    global acc_id_counter, order_id_counter
     state_data = user_states.get(user_id)
     if not state_data: return
     
-    media_ids_json = json.dumps(state_data['media_ids'])
-    media_types_json = json.dumps(state_data['media_types'])
-    
     if state_data['is_admin'] == "1":
-        async def save_to_db():
-            async with await get_db() as db:
-                await db.execute(
-                    "INSERT INTO accounts (type, desc, price, media_ids, media_types) VALUES (?, ?, ?, ?, ?)",
-                    [state_data['type'], state_data['desc'], state_data['price'], media_ids_json, media_types_json]
-                )
-        try:
-            asyncio.run(save_to_db())
-            bot.send_message(chat_id, "✅ تم حفظ المنشور مع كامل ألبومه وإضافته للمتجر بنجاح!")
-            # 🔔 إرسال إشعار تلقائي للجميع
-            notify_all_users(state_data['type'], state_data['price'], state_data['desc'])
-        except Exception as e:
-            bot.send_message(chat_id, "❌ حدث خطأ أثناء الحفظ في قاعدة البيانات.")
+        new_account = {
+            'id': acc_id_counter,
+            'type': state_data['type'],
+            'desc': state_data['desc'],
+            'price': state_data['price'],
+            'media_ids': state_data['media_ids'],
+            'media_types': state_data['media_types'],
+            'is_sold': 0
+        }
+        accounts.append(new_account)
+        acc_id_counter += 1
+        
+        bot.send_message(chat_id, "✅ تم حفظ المنشور مع كامل ألبومه وإضافته للمتجر بنجاح!")
+        notify_all_users(state_data['type'], state_data['price'], state_data['desc'])
     else:
-        async def save_to_pending():
-            async with await get_db() as db:
-                await db.execute(
-                    "INSERT INTO pending_orders (user_id, type, desc, price, media_ids, media_types) VALUES (?, ?, ?, ?, ?, ?)",
-                    [user_id, state_data['type'], state_data['desc'], state_data['price'], media_ids_json, media_types_json]
-                )
-        try:
-            asyncio.run(save_to_pending())
-            bot.send_message(chat_id, "📥 تم إرسال منشورك مع ألبومه بنجاح للأدمن للمراجعة!\nسيتم فحصه ونشره في البوت فوراً إذا كان موافقاً للشروط.")
-            bot.send_message(ADMIN_ID, "🔔 إشعار: زبون جديد قام بتقديم سلعة للبيع، ادخل للوحة التحكم لمراجعتها.")
-        except Exception as e:
-            bot.send_message(chat_id, "❌ فشل إرسال الطلب، يرجى إعادة المحاولة.")
+        new_order = {
+            'id': order_id_counter,
+            'user_id': user_id,
+            'type': state_data['type'],
+            'desc': state_data['desc'],
+            'price': state_data['price'],
+            'media_ids': state_data['media_ids'],
+            'media_types': state_data['media_types']
+        }
+        pending_orders.append(new_order)
+        order_id_counter += 1
+        
+        bot.send_message(chat_id, "📥 تم إرسال منشورك بنجاح للأدمن للمراجعة!\nسيتم فحصه ونشره فوراً إذا كان موافقاً للشروط.")
+        bot.send_message(ADMIN_ID, "🔔 إشعار: زبون جديد قام بتقديم سلعة للبيع، ادخل للوحة التحكم لمراجعتها.")
             
     user_states.pop(user_id, None)
 
@@ -310,24 +283,15 @@ def show_accounts(call):
         index = int(parts[-1])
         acc_type = "_".join(parts[1:-1])
     
-    async def get_accs():
-        async with await get_db() as db:
-            res = await db.execute("SELECT * FROM accounts WHERE type=? AND is_sold=0", [acc_type])
-            return res.rows
-            
-    accs = asyncio.run(get_accs())
+    accs = [a for a in accounts if a['type'] == acc_type and a['is_sold'] == 0]
+
     if not accs:
         bot.answer_callback_query(call.id, "🚫 لا توجد منشورات متوفرة حالياً في هذا القسم!", show_alert=True)
         return
         
     acc = accs[index]
-    
-    try:
-        media_ids = json.loads(acc[4])
-        media_types = json.loads(acc[5])
-    except Exception:
-        media_ids = [acc[4]]
-        media_types = [acc[5]]
+    media_ids = acc['media_ids']
+    media_types = acc['media_types']
         
     if img_index >= len(media_ids): img_index = 0
     
@@ -342,24 +306,24 @@ def show_accounts(call):
         'fb_page': 'صفحة فيسبوك'
     }
     name_ar = type_names.get(acc_type, "السلعة")
-    caption = f"📦 حساب {name_ar} متوفر حالياً:\n\n🆔 رقم الحساب (ID): {acc[0]}\n📝 الوصف:\n{acc[2]}\n\n💵 السعر: {acc[3]}"
+    caption = f"📦 حساب {name_ar} متوفر حالياً:\n\n🆔 رقم الحساب (ID): {acc['id']}\n📝 الوصف:\n{acc['desc']}\n\n💵 السعر: {acc['price']}"
     
-    markup = get_acc_markup(acc[0], acc_type, index, len(accs), img_index, len(media_ids))
+    markup = get_acc_markup(acc['id'], acc_type, index, len(accs), img_index, len(media_ids))
     
     try:
         if current_media_type == 'photo':
-            bot.edit_message_media(InputMediaPhoto(current_media_id, caption=caption, parse_mode="Markdown"), call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.edit_message_media(InputMediaPhoto(current_media_id, caption=caption), call.message.chat.id, call.message.message_id, reply_markup=markup)
         else:
-            bot.edit_message_media(InputMediaVideo(current_media_id, caption=caption, parse_mode="Markdown"), call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.edit_message_media(InputMediaVideo(current_media_id, caption=caption), call.message.chat.id, call.message.message_id, reply_markup=markup)
     except Exception:
         try: 
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception: 
             pass
         if current_media_type == 'photo':
-            bot.send_photo(call.message.chat.id, photo=current_media_id, caption=caption, parse_mode="Markdown", reply_markup=markup)
+            bot.send_photo(call.message.chat.id, photo=current_media_id, caption=caption, reply_markup=markup)
         else:
-            bot.send_video(call.message.chat.id, video=current_media_id, caption=caption, parse_mode="Markdown", reply_markup=markup)
+            bot.send_video(call.message.chat.id, video=current_media_id, caption=caption, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("review_pending_") or call.data.startswith("revmed_"))
 def review_pending(call):
@@ -370,13 +334,7 @@ def review_pending(call):
     index = int(parts[1]) if not is_media_click else int(parts[2])
     img_index = int(parts[3]) if is_media_click else 0
     
-    async def get_pending():
-        async with await get_db() as db:
-            res = await db.execute("SELECT * FROM pending_orders")
-            return res.rows
-            
-    rows = asyncio.run(get_pending())
-    if not rows:
+    if not pending_orders:
         try: 
             bot.delete_message(call.message.chat.id, call.message.message_id)
         except Exception: 
@@ -384,17 +342,16 @@ def review_pending(call):
         bot.send_message(call.message.chat.id, "📥 لا توجد أي سلع أو منشورات معلقة حالياً لمراجعتها!", reply_markup=main_menu(ADMIN_ID))
         return
         
-    if index >= len(rows): index = 0
+    if index >= len(pending_orders): index = 0
     
-    row = rows[index]
-    order_id, user_id, acc_type, desc, price, media_ids_raw, media_types_raw = row
-    
-    try:
-        media_ids = json.loads(media_ids_raw)
-        media_types = json.loads(media_types_raw)
-    except Exception:
-        media_ids = [media_ids_raw]
-        media_types = [media_types_raw]
+    row = pending_orders[index]
+    order_id = row['id']
+    user_id = row['user_id']
+    acc_type = row['type']
+    desc = row['desc']
+    price = row['price']
+    media_ids = row['media_ids']
+    media_types = row['media_types']
         
     if img_index >= len(media_ids): img_index = 0
     
@@ -429,8 +386,8 @@ def review_pending(call):
     nav_buttons = []
     if index > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ السابق", callback_data=f"review_pending_{index-1}"))
-    nav_buttons.append(InlineKeyboardButton(f"الطلبات: {index+1}/{len(rows)}", callback_data="ignore"))
-    if index < len(rows) - 1:
+    nav_buttons.append(InlineKeyboardButton(f"الطلبات: {index+1}/{len(pending_orders)}", callback_data="ignore"))
+    if index < len(pending_orders) - 1:
         nav_buttons.append(InlineKeyboardButton("التالي ➡️", callback_data=f"review_pending_{index+1}"))
     markup.row(*nav_buttons)
     markup.row(InlineKeyboardButton("🛠 العودة للوحة التحكم", callback_data="admin_panel"))
@@ -452,60 +409,56 @@ def review_pending(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("accept_"))
 def accept_order(call):
+    global acc_id_counter
     if call.from_user.id != ADMIN_ID: return
     order_id = int(call.data.split("_")[1])
     
-    async def db_accept():
-        async with await get_db() as db:
-            cursor = await db.execute("SELECT * FROM pending_orders WHERE id=?", [order_id])
-            rows = cursor.rows
-            if rows:
-                row = rows[0]
-                await db.execute(
-                    "INSERT INTO accounts (type, desc, price, media_ids, media_types) VALUES (?, ?, ?, ?, ?)",
-                    [row[2], row[3], row[4], row[5], row[6]]
-                )
-                await db.execute("DELETE FROM pending_orders WHERE id=?", [order_id])
-                return row
-            return None
-
-    row_data = asyncio.run(db_accept())
-    if row_data:
+    order = next((o for o in pending_orders if o['id'] == order_id), None)
+    
+    if order:
+        new_account = {
+            'id': acc_id_counter,
+            'type': order['type'],
+            'desc': order['desc'],
+            'price': order['price'],
+            'media_ids': order['media_ids'],
+            'media_types': order['media_types'],
+            'is_sold': 0
+        }
+        accounts.append(new_account)
+        acc_id_counter += 1
+        pending_orders.remove(order)
+        
         bot.answer_callback_query(call.id, "✅ تم قبول السلعة ونشرها في المتجر بنجاح!", show_alert=True)
         try: 
-            bot.send_message(row_data[1], "🎉 أخبار سارة! تم مراجعة منشورك وقبوله من طرف الأدمن، وهو الآن معروض للبيع مع كامل صوره داخل البوت.")
+            bot.send_message(order['user_id'], "🎉 أخبار سارة! تم مراجعة منشورك وقبوله من طرف الأدمن، وهو الآن معروض للبيع مع كامل صوره داخل البوت.")
         except Exception: 
             pass
             
-        # 🔔 إرسال إشعارات لجميع المستخدمين الذين ضغطوا /start عند قبول السلعة
-        notify_all_users(row_data[2], row_data[4], row_data[3])
+        notify_all_users(order['type'], order['price'], order['desc'])
     else:
         bot.answer_callback_query(call.id, "❌ تعذر العثور على البيانات.")
         
-    review_pending(call)
+    admin_panel(call)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("reject_"))
 def reject_order(call):
     if call.from_user.id != ADMIN_ID: return
     order_id = int(call.data.split("_")[1])
     
-    async def db_reject():
-        async with await get_db() as db:
-            cursor = await db.execute("SELECT user_id FROM pending_orders WHERE id=?", [order_id])
-            rows = cursor.rows
-            user_id = rows[0][0] if rows else None
-            await db.execute("DELETE FROM pending_orders WHERE id=?", [order_id])
-            return user_id
-
-    user_id = asyncio.run(db_reject())
-    bot.answer_callback_query(call.id, "❌ تم رفض السلعة وحذفها نهائياً.", show_alert=True)
-    if user_id:
-        try: 
-            bot.send_message(user_id, "⚠️ للاسف، تم رفض منشور السلعة الذي أرسلته من طرف الإدارة.")
-        except Exception: 
-            pass
+    order = next((o for o in pending_orders if o['id'] == order_id), None)
     
-    review_pending(call)
+    if order:
+        user_id = order['user_id']
+        pending_orders.remove(order)
+        bot.answer_callback_query(call.id, "❌ تم رفض السلعة وحذفها نهائياً.", show_alert=True)
+        if user_id:
+            try: 
+                bot.send_message(user_id, "⚠️ للاسف، تم رفض منشور السلعة الذي أرسلته من طرف الإدارة.")
+            except Exception: 
+                pass
+    
+    admin_panel(call)
 
 @bot.callback_query_handler(func=lambda call: call.data == "set_sold")
 def set_sold_step(call):
@@ -522,30 +475,21 @@ def process_sell_id(message):
         bot.send_message(message.chat.id, "⚠️ يرجى إرسال رقم الـ ID صحيح (أرقام فقط):")
         return
     
-    async def db_sell():
-        async with await get_db() as db:
-            cursor = await db.execute("SELECT * FROM accounts WHERE id=?", [acc_id])
-            rows = cursor.rows
-            if rows:
-                await db.execute("UPDATE accounts SET is_sold=1 WHERE id=?", [acc_id])
-                return rows[0]
-            return None
+    acc = next((a for a in accounts if a['id'] == int(acc_id)), None)
+    
+    if acc:
+        acc['is_sold'] = 1
+        bot.send_message(message.chat.id, f"✅ تم نقل الحساب رقم {acc_id} إلى المبيعات السابقة بنجاح!")
+    else:
+        bot.send_message(message.chat.id, f"❌ لم يتم العثور على حساب يحمل الرقم {acc_id}.")
 
-    try:
-        acc_data = asyncio.run(db_sell())
-        if acc_data:
-            bot.send_message(message.chat.id, f"✅ تم نقل الحساب رقم {acc_id} إلى المبيعات السابقة بنجاح!")
-        else:
-            bot.send_message(message.chat.id, f"❌ لم يتم العثور على حساب يحمل الرقم {acc_id} في القاعدة.")
-    except Exception as e:
-        bot.send_message(message.chat.id, "❌ فشلت العملية بسبب خطأ داخلي.")
     user_states.pop(message.from_user.id, None)
 
 @bot.callback_query_handler(func=lambda call: call.data == "del_acc")
 def del_acc_step(call):
     if call.from_user.id != ADMIN_ID: return
     user_states[call.from_user.id] = {'step': 'delete_id'}
-    bot.edit_message_text("❌ أرسل لي (رقم ID الحساب) لحذفه نهائياً من المتجر والقاعدة:", call.message.chat.id, call.message.message_id)
+    bot.edit_message_text("❌ أرسل لي (رقم ID الحساب) لحذفه نهائياً من المتجر:", call.message.chat.id, call.message.message_id)
 
 @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get('step') == 'delete_id')
 def process_delete_id(message):
@@ -556,22 +500,13 @@ def process_delete_id(message):
         bot.send_message(message.chat.id, "⚠️ يرجى إرسال رقم الـ ID صحيح (أرقام فقط):")
         return
 
-    async def db_delete():
-        async with await get_db() as db:
-            cursor = await db.execute("SELECT * FROM accounts WHERE id=?", [acc_id])
-            if cursor.rows:
-                await db.execute("DELETE FROM accounts WHERE id=?", [acc_id])
-                return True
-            return False
+    acc = next((a for a in accounts if a['id'] == int(acc_id)), None)
+    if acc:
+        accounts.remove(acc)
+        bot.send_message(message.chat.id, f"🗑️ تم حذف الحساب رقم {acc_id} نهائياً!")
+    else:
+        bot.send_message(message.chat.id, f"❌ لم يتم العثور على حساب يحمل الرقم {acc_id}.")
 
-    try:
-        success = asyncio.run(db_delete())
-        if success:
-            bot.send_message(message.chat.id, f"🗑️ تم حذف الحساب رقم {acc_id} نهائياً!")
-        else:
-            bot.send_message(message.chat.id, f"❌ لم يتم العثور على حساب يحمل الرقم {acc_id} في القاعدة.")
-    except Exception as e:
-        bot.send_message(message.chat.id, "❌ فشل الحذف بسبب خطأ داخلي.")
     user_states.pop(message.from_user.id, None)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
@@ -592,37 +527,30 @@ def broadcast_step(call):
 @bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get('step') == 'broadcast_msg')
 def send_broadcast(message):
     if message.from_user.id != ADMIN_ID: return
-    async def get_users():
-        async with await get_db() as db:
-            res = await db.execute("SELECT user_id FROM users")
-            return res.rows
-            
-    users = asyncio.run(get_users())
+    
     count = 0
-    bot.send_message(message.chat.id, f"⏳ جاري بدء إرسال الإعلان إلى {len(users)} مستخدم...")
-    for user in users:
+    user_list = list(users)
+    bot.send_message(message.chat.id, f"⏳ جاري بدء إرسال الإعلان إلى {len(user_list)} مستخدم...")
+    for u_id in user_list:
         try:
-            bot.send_message(user[0], message.text)
+            bot.send_message(u_id, message.text)
             count += 1
+            time.sleep(0.04) # فاصل زمني لتفادي حظر تليجرام
         except Exception: 
             continue
-    bot.send_message(message.chat.id, f"✅ تم انتهاء الإرسال بنجاح وتعميم المنشور على {count} زبون بنجاح.")
+    bot.send_message(message.chat.id, f"✅ تم انتهاء الإرسال بنجاح وتعميم المنشور على {count} زبون.")
     user_states.pop(message.from_user.id, None)
 
 @bot.callback_query_handler(func=lambda call: call.data == "sold_accs")
 def show_sold(call):
-    async def get_sold():
-        async with await get_db() as db:
-            res = await db.execute("SELECT * FROM accounts WHERE is_sold=1")
-            return res.rows
-            
-    accs = asyncio.run(get_sold())
-    if not accs:
+    sold_list = [a for a in accounts if a['is_sold'] == 1]
+
+    if not sold_list:
         bot.answer_callback_query(call.id, "لا توجد مبيعات مؤرشفة بعد داخل البوت!", show_alert=True)
         return
     bot.send_message(call.message.chat.id, "📦 هذه قائمة بالحسابات التي تم بيعها سابقاً ومؤرشفة:")
-    for acc in accs:
-        bot.send_message(call.message.chat.id, f"✅ تم بيع حساب رقم: {acc[0]} \n📝 الوصف: {acc[2]}")
+    for acc in sold_list:
+        bot.send_message(call.message.chat.id, f"✅ تم بيع حساب رقم: {acc['id']} \n📝 الوصف: {acc['desc']}")
 
-print("🚀 [تشغيل]: البوت يعمل بالكامل...")
+print("🚀 [تشغيل]: البوت يعمل الآن بالذاكرة المؤقتة بدون قواعد بيانات...")
 bot.infinity_polling(timeout=60, long_polling_timeout=5)
